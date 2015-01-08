@@ -1,0 +1,5 @@
+name = DFP Report
+description = DFP report
+core = 7.x
+dependencies[] = date
+dependencies[] = libraries

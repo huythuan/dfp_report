@@ -1,0 +1,317 @@
+<?php
+/**
+ * @file
+ * DFP Report installation
+ */
+/**
+ * Implements hook_schema().
+ */
+
+function dfp_report_schema() {
+  $schema = array();
+  $schema['dfp_report'] = array(
+    'fields' => array(
+      'nid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+      'last_send' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('nid'),
+  );
+
+  return $schema;
+}
+
+
+/**
+ * Implements hook_install().
+ */
+function dfp_report_install() {
+	// Set default variables.
+  $current = variable_get('mail_system', array('default-system' => 'DefaultMailSystem'));
+  $addition = array('dfp_report' => 'DFPReportMailSystem');
+  variable_set('mail_system', array_merge($current, $addition));
+  // Get localization function for installation as t() may be unavailable.
+  $t = get_t();
+
+  // Give user feedback.
+  drupal_set_message($t('DFP Report variables created.'));
+
+  $type = array(
+    'type' => 'dfp_report',
+    'name' => $t('DFP Order'),
+    'base' => 'node_content',
+    'title_label' => $t('DFP Order Name'),
+    'description' => $t('DFP Report'),
+    'custom' => 1,
+    'modified' => 1,
+    'locked' => 0,
+  );
+
+  $type = node_type_set_defaults($type);
+  node_type_save($type);
+
+  // Create fields.
+  $fields = array(
+	array(
+      'field_name' => 'field_dfp_report_email',
+      'type' => 'text',
+      'cardinality' => 1,
+      'translatable' => TRUE,
+      'settings' => array(
+        'max_length' => 255,
+      ),
+      'translatable' => TRUE,
+      'entity_types' => array(),
+    ),
+	  array(
+	      'field_name' => 'field_dfp_email_schedule',
+	      'type' => 'list_text',
+	      'cardinality' => 1,
+	      'translatable' => TRUE,
+	      'locked' => FALSE,
+	      'module' => 'list',
+	      'settings' => array(
+	        'allowed_values' => array(
+	          'daily' => $t('Daily'),
+	          'weekly' => $t('Weekly'),
+	          'monthly' => $t('Monthly'),
+	        ),
+	        'allowed_values_function' => '',
+	      ),
+	      'storage' => array(
+	        'type' => 'field_sql_storage',
+	        'settings' => array(),
+	      ),
+	    ),
+	array(
+      'field_name' => 'field_dfp_report_id',
+      'type' => 'text',
+      'cardinality' => 1,
+      'translatable' => TRUE,
+      'settings' => array(
+        'max_length' => 255,
+      ),
+      'translatable' => TRUE,
+      'entity_types' => array(),
+    ),
+	array(
+      'field_name' => 'field_dfp_report_start_date',
+      'label' => $t('Report Start Date'),
+      'cardinality' => 1,
+      'type' => 'datetime',
+      'module' => 'date',
+      'settings' => array(
+          'granularity' => array(
+              'month' => 'month',
+              'day' => 'day',
+              'year' => 'year',
+          ),
+          'tz_handling' => 'site',
+          'timezone_db' => 'UTC',
+          'cache_enabled' => 0,
+          'cache_count' => '4',
+      ),
+    ),
+	array(
+      'field_name' => 'field_dfp_report_end_date',
+      'label' => $t('Report End Date'),
+      'cardinality' => 1,
+      'type' => 'datetime',
+      'module' => 'date',
+      'settings' => array(
+          'granularity' => array(
+              'month' => 'month',
+              'day' => 'day',
+              'year' => 'year',
+          ),
+          'tz_handling' => 'site',
+          'timezone_db' => 'UTC',
+          'cache_enabled' => 0,
+          'cache_count' => '4',
+      ),
+    ),
+
+  );
+  foreach ($fields as $field) {
+    field_create_field($field);
+  }
+
+// Create Field Instances.
+  $instances = array();
+  $instances['field_dfp_report_email'] = array(
+    'field_name' => 'field_dfp_report_email',
+    'entity_type' => 'node',
+    'bundle' => 'dfp_report',
+    'label' => $t('Report Emails'),
+    'required' => TRUE,
+    'description' => $t('Enter email address for report,eg: tom@example.com;john@example.com.'),
+    'widget' => array(
+      'type' => 'text_textfield',
+      'settings' => array(
+        'size' => 60,
+      ),
+      'weight' => 3,
+    ),
+    'settings' => array(
+      'text_processing' => 0,
+    ),
+    'display' => array(
+      'default' => array(
+        'label' => 'above',
+        'type' => 'text_default',
+        'settings' => array(),
+      ),
+    ),
+  );
+
+  $instances['field_dfp_report_start_date'] = array(
+    'field_name' => 'field_dfp_report_start_date',
+    'entity_type' => 'node',
+    'bundle' => 'dfp_report',
+    'label' => $t('Report Start Date'),
+    'required' => TRUE,
+    'cardinality' => 1,
+    'widget' => array(
+        'type' => 'date_popup',
+        'module' => 'date',
+        'settings' => array(
+            'input_format' => 'm/d/Y',
+            'input_format_custom' => '',
+            'year_range' => '-3:+3',
+            'increment' => '15',
+            'label_position' => 'above',
+            'text_parts' => array(),
+        ),
+	),
+  );
+
+  $instances['field_dfp_report_end_date'] = array(
+    'field_name' => 'field_dfp_report_end_date',
+    'entity_type' => 'node',
+    'bundle' => 'dfp_report',
+    'label' => $t('Report End Date'),
+    'required' => TRUE,
+    'cardinality' => 1,
+    'widget' => array(
+        'type' => 'date_popup',
+        'module' => 'date',
+        'settings' => array(
+            'input_format' => 'm/d/Y',
+            'input_format_custom' => '',
+            'year_range' => '-3:+3',
+            'increment' => '15',
+            'label_position' => 'above',
+            'text_parts' => array(),
+        ),
+	),
+  );
+
+
+
+
+  $instances['field_dfp_email_schedule'] = array(
+    'field_name' => 'field_dfp_email_schedule',
+    'entity_type' => 'node',
+    'label' => $t('Report Email Schedule'),
+    'bundle' => 'dfp_report',
+    'description' => $t('Please select schedule.'),
+    'required' => TRUE,
+	'weight' => 50,
+    'default_value' => array(
+      0 => array(
+        'value' => 'weekly',
+      ),
+    ),
+    'settings' => array(
+      'allowed_values'  => array(
+        'daily' => $t('Daily'),
+        'weekly' => $t('Weekly'),
+        'monthly' => $t('Monthly'),
+      ),
+      'user_register_form' => FALSE,
+    ),
+    'user_register_form' => FALSE,
+    'widget' => array(
+      'active' => 1,
+      'type' => 'options_select',
+      'weight' => 50,
+      'module' => 'list',
+    ),
+
+    'display' => array(
+      'default' => array(
+        'label' => 'hidden',
+        'type' => 'list_default',
+        'module' => 'list',
+        'weight' => 50,
+      ),
+      'teaser' => array(
+        'label' => 'hidden',
+        'type' => 'list_default',
+        'module' => 'list',
+        'weight' => 50,
+      ),
+    ),
+  );
+  $instances['field_dfp_report_id'] = array(
+    'field_name' => 'field_dfp_report_id',
+    'entity_type' => 'node',
+    'bundle' => 'dfp_report',
+    'label' => $t('Order ID'),
+    'required' => TRUE,
+    'widget' => array(
+      'type' => 'text_textfield',
+      'settings' => array(
+        'size' => 60,
+      ),
+      'weight' => -1,
+    ),
+    'settings' => array(
+      'text_processing' => 0,
+    ),
+    'display' => array(
+      'default' => array(
+        'label' => 'above',
+        'type' => 'text_default',
+        'settings' => array(),
+      ),
+    ),
+  );
+
+  foreach ($instances as $instance) {
+    $instance['entity_type'] = 'node';
+    $instance['bundle'] = 'dfp_report';
+    field_create_instance($instance);
+  }
+
+}
+
+
+
+/**
+ * Implements hook_uninstall().
+ */
+function dfp_report_uninstall() {
+	
+  $mail_system = variable_get('mail_system', array('default-system' => 'DefaultMailSystem'));
+  unset($mail_system['dfp_report']);
+  variable_set('mail_system', $mail_system);
+
+  field_delete_field('dfp_profile_id');
+  field_delete_field('dfp_company');
+  field_delete_field('dfp_groupings');
+  field_delete_field('field_dfp_profile_url');
+  field_delete_field('field_dfp_email_schedule');
+  field_delete_field('field_dfp_report_email');
+
+
+  node_type_delete('dfp_report');
+
+
+}

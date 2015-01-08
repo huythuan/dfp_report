@@ -1,0 +1,350 @@
+<?php
+class DFPReportMailSystem extends DefaultMailSystem {
+  public function format(array $message) {
+    $message['body'] = implode("\n\n", $message['body']);
+    $message['body'] = drupal_wrap_mail($message['body']);
+    return $message;
+  }
+}
+/**
+ * Implements hook_menu().
+ */
+function dfp_report_menu() {
+  $items = array();
+
+  $items['oauth2callback'] = array(
+    'title' => 'DFP Authentication',
+    'page callback' => 'dfp_report_authenticate_page',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+    'file' => 'dfp_report.pages.inc',
+  );
+
+  $items['admin/config/system/dfp_report_auth'] = array(
+    'title' => 'DFP Report Authentication',
+    'description' => t('Authenticate DFP Reports'),
+    'type' => MENU_NORMAL_ITEM,
+    'page callback' => 'dfp_report_page_settings_auth',
+    'access callback' => TRUE,
+    'file' => 'dfp_report.pages.inc',
+    'access arguments' => array('administer dfp_report auth'),
+  );
+ 
+  $items['dfp-report'] = array(
+    'title' => 'DFP Report',
+    'description' => t('DFP Report'),
+    'type' => MENU_NORMAL_ITEM,
+    'page callback' => 'dfp_report_page_report',
+    'access callback' => TRUE,
+    'file' => 'dfp_report.pages.inc',
+  );
+
+  return $items;
+}
+/**
+ * Implements hook_theme().
+ */
+
+function dfp_report_theme() {
+  return array(
+	'dfp_report_send_mail' => array(
+	      'variables' => array('summary' => NULL,'date' =>NULL),
+	      'template' => 'dfp_report_send_mail',
+	    ),	
+  );
+}
+function dfp_report_cron(){
+	$query = db_select('node', 'n'); 
+	$query->condition('n.type','dfp_report');
+	$query->condition('n.status','1');
+	$query->join('field_data_field_dfp_report_email', 'e', 'n.nid = e.entity_id');
+	$query->join('field_data_field_dfp_report_id', 'p', 'n.nid = p.entity_id');
+	$query->join('field_data_field_dfp_email_schedule', 's', 'n.nid = s.entity_id');
+	$query->join('field_data_field_dfp_report_end_date', 't', 'n.nid = t.entity_id');
+	$query->groupBy('n.nid');
+	$query->fields("p", array("field_dfp_report_id_value"));
+	$query->fields("s", array("field_dfp_email_schedule_value"));
+	$query->fields("n", array("title","nid"));
+	$query->fields("e", array("field_dfp_report_email_value"));
+    $query->fields("t", array("field_dfp_report_end_date_value"));
+    $results = $query->execute();
+    if (count($results) > 0) {
+	 foreach ($results as $value) {
+		    //if the end date has passed, the system stop sending the reports to the user
+		    if(strtotime($value->field_dfp_report_end_date_value) >= time()){
+			    if(dfp_report_check_time($value->nid,$value->field_dfp_email_schedule_value)) {
+					//print_r($value);
+					//get data;
+					if($value->field_dfp_email_schedule_value =='daily'){
+						$time = 'YESTERDAY';
+					}
+					if($value->field_dfp_email_schedule_value =='weekly'){
+						$time = 'LAST_WEEK';
+					}
+					if($value->field_dfp_email_schedule_value =='monthly'){
+                        $time = 'LAST_MONTH';
+					}
+					if(dfp_report_get_report($value->field_dfp_report_id_value,$time)){
+					  	$filePath = variable_get('file_public_path', conf_path() . '/files').'/report.csv.gz';
+						if(dfp_report_unzip_gz_file($filePath)){
+							//delete file gz
+							unlink($filePath);
+							$filePath = variable_get('file_public_path', conf_path() . '/files').'/report.csv';
+							$report = fopen($filePath, 'r');
+							while(! feof($report))
+							  {
+							     $data[] = fgetcsv($report);
+							  }
+
+							fclose($report);
+							//delete file csv
+							unlink($filePath);
+							//send data;
+							if(isset($data)){
+								//print_r($data);
+								//send email
+								dfp_report_process_mail($data,$value);
+								unset($data);
+							}
+						}	
+
+				    }
+		     	}
+		    }
+
+		}
+	}
+
+}
+
+/*
+* Check time before send email
+* return True or False
+*/
+function dfp_report_check_time($nid,$period){
+	$send = FALSE;
+	$query = db_select('dfp_report', 'g'); 
+	$query->condition('g.nid',$nid);
+	$query->groupBy('g.nid');
+	$query->fields("g", array("last_send"));
+	$results = $query->execute();
+	$exist = $results->rowCount();
+	if($exist > 0) {
+		foreach ($results as $value) { 
+			switch ($period)
+				{
+					case "daily":
+							if(strtotime('+1 day', $value->last_send ) < time()){
+								db_update('dfp_report') 
+							  	->fields(array(
+							    	'last_send' => time(),
+							  		))
+							  			->condition('nid',$nid)
+							  			->execute();
+									$send = TRUE;
+								}
+								break;
+					case "weekly":
+							if(strtotime('+1 week', $value->last_send ) < time()){
+								$day = date('D');
+								if($day == Mon){
+								           db_update('dfp_report') 
+										    ->fields(array(
+										      'last_send' => time(),
+										    ))
+										    ->condition('nid',$nid)
+										    ->execute();
+									        $send = TRUE;
+								   }
+							 
+						   		}
+								break;		
+					case "monthly":
+								if(strtotime('+1 month', $value->last_send ) < time()){
+									$date = date('d');
+									if($date == 01){
+									    	db_update('dfp_report') 
+												->fields(array(
+											  'last_send' => time(),
+												))
+												->condition('nid',$nid)
+												->execute();
+												$send = TRUE;
+											}
+									}
+												
+					    			break;
+
+								}
+						}
+
+	}else {
+		$record = array();
+		$record['nid'] = $nid;
+		$record['last_send'] = time();
+		drupal_write_record('dfp_report', $record);
+		$send = TRUE;
+	}
+   return 	$send;
+}
+
+/**
+ * Implements hook_mail().
+ */
+function dfp_report_mail($key, &$message, $params) {
+    switch($key) {
+      case 'notice':
+        $message['headers']['MIME-Version'] = '1.0;';
+      	$message['headers']['Content-Type'] = 'text/html;';
+		$message['headers']['charset'] = 'utf-8;';		
+      	$message['subject'] = $params['subject'];
+      	$message['body'][] = $params['body'];
+      break;
+    }
+}
+function dfp_report_process_mail($data,$value){
+		$params['subject'] = 'DFP Report For:'.$value->title;
+		$params['body'] = theme('dfp_report_send_mail', array('summary' => $data, 'date'=> 		$value->field_dfp_email_schedule_value,'template' => 'dfp_send_mail'));
+    	$to = $value->field_dfp_report_email_value;
+    	$from = 'BCI Interactive Media <ryan@bciinteractive.com>';
+    	$lang = language_default();
+    	drupal_mail('dfp_report', 'notice', $to, $lang, $params, $from);
+		//	echo "hello1";
+}
+
+
+
+/**
+* Implement preprocess page
+*/
+function dfp_report_preprocess_page(&$variables) {
+	if(current_path() == 'node/add/dfp-report'){
+		drupal_add_js('http://ajax.googleapis.com/ajax/libs/jqueryui/1.11.1/jquery-ui.min.js', 'external');
+		drupal_add_css('http://ajax.googleapis.com/ajax/libs/jqueryui/1.11.1/themes/smoothness/jquery-ui.css', 'external');
+	}
+
+}
+
+
+/**
+* Get report from DFP google account with id of ads and time range.
+* Return  the download file url.
+*/
+function dfp_report_get_report($id,$time) {
+	set_include_path('sites/all/libraries/googleads-php-lib-master/src/');
+	$path = libraries_get_path('googleads-php-lib-master');
+	require_once $path.'/src/Google/Api/Ads/Dfp/Lib/DfpUser.php';
+	require_once $path.'/src/Google/Api/Ads/Dfp/Util/ReportDownloader.php';
+	require_once $path.'/src/Google/Api/Ads/Dfp/Util/StatementBuilder.php';
+	$orderId = (int)$id;
+	try {
+	    $oauth2Info = array(
+	      'client_id' => variable_get('dfp_report_client_id'),
+	      'client_secret' => variable_get('dfp_report_client_secret'),
+	      'refresh_token' => variable_get('dfp_report_refresh_token')
+	      );
+	      $applicationName = variable_get('dfp_report_application_name');
+	      $networkCode = variable_get('dfp_report_network_code');
+
+	      // See DfpUser constructor
+	      $user = new DfpUser(NULL, NULL, NULL, $applicationName, $networkCode,
+	      NULL, NULL, $oauth2Info);
+	  
+	  	 // Log SOAP XML request and response.
+		  $user->LogDefaults();
+
+		  // Get the ReportService.
+		  $reportService = $user->GetService('ReportService', 'v201411');
+
+		  // Create report query.
+		  $reportQuery = new ReportQuery();
+		  $reportQuery->dimensions = array('LINE_ITEM_ID', 'LINE_ITEM_NAME');
+		
+
+		  $reportQuery->columns = array('AD_SERVER_IMPRESSIONS', 'AD_SERVER_CLICKS',
+			      'AD_SERVER_CTR', 'AD_SERVER_CPM_AND_CPC_REVENUE', 
+			      'AD_SERVER_WITHOUT_CPD_AVERAGE_ECPM');
+
+		  // Set the dynamic date range type or a custom start and end date that is
+		  // the beginning of the week (Sunday) to the end of the week (Saturday), or
+		  // the first of the month to the end of the month.
+		  $statementBuilder = new StatementBuilder();
+		  $statementBuilder->Where('LINE_ITEM_ID = :orderId')->WithBindVariableValue(
+		      'orderId', $orderId);
+
+		  // Set the filter statement.
+		  $reportQuery->statement = $statementBuilder->ToStatement();
+		  $reportQuery->dateRangeType = $time;
+
+		  // Create report job.
+		  $reportJob = new ReportJob();
+		  $reportJob->reportQuery = $reportQuery;
+
+		  // Run report job.
+		  $reportJob = $reportService->runReportJob($reportJob);
+		  // Create report downloader.
+		  $reportDownloader = new ReportDownloader($reportService, $reportJob->id);
+
+		  // Wait for the report to be ready.
+		  $reportDownloader->waitForReportReady();
+	
+	
+	      // Create report downloader.
+          $reportDownloader = new ReportDownloader($reportService, $reportJob->id);
+
+          // Wait for the report to be ready.
+          $reportDownloader->waitForReportReady();
+
+          // Change to your file location.
+          $filePath = variable_get('file_public_path', conf_path() . '/files').'/report.csv.gz';
+
+          printf("Downloading report to %s ...\n", $filePath);
+
+          // Download the report.
+          $reportDownloader->downloadReport('CSV_DUMP', $filePath);
+
+          return TRUE;
+	
+	} catch (OAuth2Exception $e) {
+	  drupal_set_message(t('1 %string.', array('%string' => $e->getMessage())), 'error');
+	} catch (ValidationException $e) {
+	  drupal_set_message(t('2 %string.', array('%string' => $e->getMessage())), 'error');
+	} catch (Exception $e) {
+	  drupal_set_message(t('3 %string.', array('%string' => $e->getMessage())), 'error');
+	}	
+	return FALSE;
+}
+
+/**
+* unzip gz file
+*/
+function dfp_report_unzip_gz_file($file) {
+	// This input should be from somewhere else, hard-coded in this example
+	if(file_exists($file)) { 
+		$file_name = $file;
+
+		// Raising this value may increase performance
+		$buffer_size = 4096; // read 4kb at a time
+		$out_file_name = str_replace('.gz', '', $file_name);
+
+		// Open our files (in binary mode)
+		$file = gzopen($file_name, 'rb');
+		$out_file = fopen($out_file_name, 'wb');
+
+		// Keep repeating until the end of the input file
+		while(!gzeof($file)) {
+		    // Read buffer-size bytes
+		    // Both fwrite and gzread and binary-safe
+		    fwrite($out_file, gzread($file, $buffer_size));
+		}
+
+		// Files are done, close files
+		fclose($out_file);
+		gzclose($file);
+		return TRUE;
+		}else{
+			return FALSE;
+		}
+		
+	
+}
