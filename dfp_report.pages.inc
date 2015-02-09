@@ -172,13 +172,52 @@ function dfp_report_page_settings_auth() {
 /**
 * Page for reporting
 */
-function dfp_report_page_report() {
+function dfp_report_page_report() {	
+	//dfp_report_get_inventory_report();
+	/*
+	$build = array(
+  	'header_text' => array(
+  		'#type' => 'markup',
+        '#markup' => '<p>'.t('Matched Unites:'.$matchedUnits ).'</p>'.
+                     '<p>'.t('Available Unites:'.$availableUnits ).'</p>'.
+					 '<p>'.t('Percent Available Units:'.$percentAvailableUnits ).'</p>'
+  	),
+  );
+  return $build;
+*/
+drupal_add_library('system', 'drupal.ajax');
+$form = drupal_get_form('dfp_report_inventory_form');
+$render = drupal_render($form);
+$build['my_div'] = array(
+  '#markup' => '<div id="dfp_inventory">'.$render .'</div>',
+);
+$build['ajax_link'] = array(
+  '#type' => 'link',
+  '#title' => t('Click here'),
+  // Note the /nojs portion of the href - if javascript is enabled,
+  // this part will be stripped from the path before it is called.
+  '#href' => 'dfp-report/ajax-callback/nojs/',
+  '#id' => 'ajax_link',
+  '#ajax' => array(
+    'wrapper' => 'dfp_inventory',
+    'method' => 'html',
+  ),
+);
+return $build;
+
+
+}
+
+/**
+* Page for getting report
+*/
+function dfp_report_get_inventory_report() {
 	set_include_path('sites/all/libraries/googleads-php-lib-master/src/');
 	$path = libraries_get_path('googleads-php-lib-master');
-	require_once $path.'/src/Google/Api/Ads/Dfp/Lib/DfpUser.php';
-	require_once $path.'/src/Google/Api/Ads/Dfp/Util/ReportDownloader.php';
-	require_once $path.'/src/Google/Api/Ads/Dfp/Util/StatementBuilder.php';
-	$orderId = 49410641;
+    require_once $path.'/src/Google/Api/Ads/Dfp/Lib/DfpUser.php';
+    require_once $path.'/src/Google/Api/Ads/Dfp/Util/DateTimeUtils.php';
+    require_once $path.'/src/Google/Api/Ads/Dfp/Util/StatementBuilder.php';
+    require_once $path. '/examples/Common/ExampleUtils.php';
 	try {
 	   $oauth2Info = array(
 	    'client_id' => variable_get('dfp_report_client_id'),
@@ -195,67 +234,35 @@ function dfp_report_page_report() {
 	  	 // Log SOAP XML request and response.
 		  $user->LogDefaults();
 
-		  // Get the ReportService.
-		  $reportService = $user->GetService('ReportService', 'v201408');
+		// Get the LineItemService.
+		  $lineItemService = $user->GetService('LineItemService', 'v201411');
 
-		  // Create report query.
-		  $reportQuery = new ReportQuery();
-		  $reportQuery->dimensions = array('LINE_ITEM_ID', 'LINE_ITEM_NAME');
-		
+		  // Create a statement to select all line items.
+		  $statementBuilder = new StatementBuilder();
+		  $statementBuilder->OrderBy('id ASC')
+		      ->Limit(StatementBuilder::SUGGESTED_PAGE_LIMIT);
 
-			  $reportQuery->columns = array('AD_SERVER_IMPRESSIONS', 'AD_SERVER_CLICKS',
-			      'AD_SERVER_CTR', 'AD_SERVER_CPM_AND_CPC_REVENUE', 
-			      'AD_SERVER_WITHOUT_CPD_AVERAGE_ECPM');
+		  // Default for total result set size.
+		  $totalResultSetSize = 0;
 
-		  // Set the dynamic date range type or a custom start and end date that is
-		  // the beginning of the week (Sunday) to the end of the week (Saturday), or
-		  // the first of the month to the end of the month.
-		$orderId = 49410641;
-		$statementBuilder = new StatementBuilder();
-		  $statementBuilder->Where('LINE_ITEM_ID = :orderId')->WithBindVariableValue(
-		      'orderId', $orderId);
+		  do {
+		    // Get line items by statement.
+		    $page = $lineItemService->getLineItemsByStatement(
+		        $statementBuilder->ToStatement());
 
-		  // Set the filter statement.
-		  $reportQuery->statement = $statementBuilder->ToStatement();
-		   $reportQuery->dateRangeType = 'LAST_MONTH';
+		    // Display results.
+		    if (isset($page->results)) {
+		      $totalResultSetSize = $page->totalResultSetSize;
+		      $i = $page->startIndex;
+		      foreach ($page->results as $lineItem) {
+		        printf("%d) Line item with ID %d, belonging to order %d, and name '%s' "
+		            . "was found.\n", $i++, $lineItem->id, $lineItem->orderId,
+		            $lineItem->name);
+		      }
+		    }
 
-		  // Create report job.
-		  $reportJob = new ReportJob();
-		  $reportJob->reportQuery = $reportQuery;
-
-		  // Run report job.
-		  $reportJob = $reportService->runReportJob($reportJob);
-		print('<pre>');
-		print_r($reportJob);
-		print('</pre>');
-		  // Create report downloader.
-		  $reportDownloader = new ReportDownloader($reportService, $reportJob->id);
-
-		  // Wait for the report to be ready.
-		  $reportDownloader->waitForReportReady();
-
-
-	//print('<pre>');
-//	print_r($reportJob);
-//	print('<pre>');
-	
-	
-	// Create report downloader.
-  $reportDownloader = new ReportDownloader($reportService, $reportJob->id);
-
-  // Wait for the report to be ready.
-  $reportDownloader->waitForReportReady();
-
-  // Change to your file location.
-  $filePath = variable_get('file_public_path', conf_path() . '/files').'/report.csv.gz';
-
-  printf("Downloading report to %s ...\n", $filePath);
-
-  // Download the report.
-  $reportDownloader->downloadReport('CSV_DUMP', $filePath);
-
-  printf("done.\n");
-	
+		    $statementBuilder->IncreaseOffsetBy(StatementBuilder::SUGGESTED_PAGE_LIMIT);
+		  } while ($statementBuilder->GetOffset() < $totalResultSetSize);
 	} catch (OAuth2Exception $e) {
 	  drupal_set_message(t('1 %string.', array('%string' => $e->getMessage())), 'error');
 	} catch (ValidationException $e) {
@@ -264,11 +271,30 @@ function dfp_report_page_report() {
 	  drupal_set_message(t('3 %string.', array('%string' => $e->getMessage())), 'error');
 	}
 	
-	$build = array(
-  	'header_text' => array(
-  		'#type' => 'markup',
-        '#markup' => '<p>'.t('Results:').'</p>'
-  	),
-  );
-  return $build;
+
+}
+
+
+
+/**
+* An Ajax callback which will load some new text for the heading tag.
+*/
+
+function test_ajax_ajax_call_back($type = 'ajax') {
+	$t = dfp_report_get_inventory_report();
+//	sleep(60);
+if($type == 'ajax'){
+//	$t = dfp_report_get_inventory_report();
+                $commands = array();
+                $commands[] = ajax_command_html('#dfp_inventory',$t);
+                $commands[]= ajax_command_changed('#dfp_inventory');
+                $page = array('#type' =>'ajax', '#commands' =>$commands);
+                ajax_deliver($page);
+
+}else{
+                $output = t('This is what should be seen if Javascript is not enable.');
+                return $output;
+
+  }
+
 }

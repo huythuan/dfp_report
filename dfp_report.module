@@ -48,7 +48,7 @@ function dfp_report_menu() {
 function dfp_report_theme() {
   return array(
 	'dfp_report_send_mail' => array(
-	      'variables' => array('summary' => NULL,'date' =>NULL),
+	      'variables' => array('summary' => NULL,'date' =>NULL,'title' =>NULL),
 	      'template' => 'dfp_report_send_mail',
 	    ),	
   );
@@ -147,7 +147,7 @@ function dfp_report_check_time($nid,$period){
 					case "weekly":
 							if(strtotime('+1 week', $value->last_send ) < time()){
 								$day = date('D');
-								if($day == Mon){
+								if($day == 'Mon'){
 								           db_update('dfp_report') 
 										    ->fields(array(
 										      'last_send' => time(),
@@ -203,8 +203,8 @@ function dfp_report_mail($key, &$message, $params) {
     }
 }
 function dfp_report_process_mail($data,$value){
-		$params['subject'] = 'DFP Report For:'.$value->title;
-		$params['body'] = theme('dfp_report_send_mail', array('summary' => $data, 'date'=> 		$value->field_dfp_email_schedule_value,'template' => 'dfp_send_mail'));
+		$params['subject'] = 'Digital Advertising Report for:'.$value->title;
+		$params['body'] = theme('dfp_report_send_mail', array('summary' => $data, 'date'=> 		$value->field_dfp_email_schedule_value,'title'=> $value->title,'template' => 'dfp_send_mail'));
     	$to = $value->field_dfp_report_email_value;
     	$from = 'BCI Interactive Media <ryan@bciinteractive.com>';
     	$lang = language_default();
