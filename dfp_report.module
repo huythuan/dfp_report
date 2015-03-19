@@ -85,11 +85,15 @@ function dfp_report_cron(){
                         $time = 'LAST_MONTH';
 					}
 					if(dfp_report_get_report($value->field_dfp_report_id_value,$time)){
-					  	$filePath = variable_get('file_public_path', conf_path() . '/files').'/report.csv.gz';
+					    $dir_name = variable_get('file_public_path', conf_path() . '/files')."/dfp_report";
+					    if(!is_dir($dir_name)){
+					    	mkdir($dir_name,0755);
+					    }
+			            $filePath = $dir_name .'/report.csv.gz';
 						if(dfp_report_unzip_gz_file($filePath)){
 							//delete file gz
 							unlink($filePath);
-							$filePath = variable_get('file_public_path', conf_path() . '/files').'/report.csv';
+							$filePath = $dir_name.'/report.csv';
 							$report = fopen($filePath, 'r');
 							while(! feof($report))
 							  {
@@ -98,7 +102,7 @@ function dfp_report_cron(){
 
 							fclose($report);
 							//delete file csv
-							unlink($filePath);
+						//	unlink($filePath);
 							//send data;
 							if(isset($data)){
 								//print_r($data);
@@ -296,9 +300,13 @@ function dfp_report_get_report($id,$time) {
           $reportDownloader->waitForReportReady();
 
           // Change to your file location.
-          $filePath = variable_get('file_public_path', conf_path() . '/files').'/report.csv.gz';
+          $dir_name = variable_get('file_public_path', conf_path() . '/files')."/dfp_report";
+		  if(!is_dir($dir_name)){
+			mkdir($dir_name,0755);
+		  }
+          $filePath = $dir_name .'/report.csv.gz';
 
-          printf("Downloading report to %s ...\n", $filePath);
+          //printf("Downloading report to %s ...\n", $filePath);
 
           // Download the report.
           $reportDownloader->downloadReport('CSV_DUMP', $filePath);
@@ -347,4 +355,275 @@ function dfp_report_unzip_gz_file($file) {
 		}
 		
 	
+}
+
+/**
+ * Implement hook_node_view().
+ */
+function dfp_report_node_view($node, $view_mode){
+	if ($node->type == 'dfp_report' && $view_mode == 'full') {
+	    // Add form input date 
+	   	$f = drupal_get_form('dfp_report_send_mail_form');
+		$f['#weight'] = -100;
+		$node->content['dfp_report_send_mail_form'] = $f;
+	}
+	
+}
+
+/**
+ * Implement hook_node_view().
+ */
+function dfp_report_send_mail_form($form,&$form_state){
+	if (arg(0) == 'node' && is_numeric(arg(1))) {
+	  $nid = arg(1);
+	}
+	$form['node_id'] = array(
+		'#type' => 'hidden',
+		'#value' => $nid,
+	);
+	$form['send_mail'] = array(
+			  '#title' => t('Emails:'),
+			  '#type' => 'fieldset',
+			  '#title' => t('Send Email'), 
+			  '#attributes' => array('class' => array('send_mail_summary')),
+			  '#collapsible' => TRUE, 
+			  '#collapsed' => TRUE,	
+			  '#weight'=>3,
+			);
+		$form['send_mail'] ['start_date_input'] = array(
+				'#title' => t('Start Date'),
+				'#default_value' => date("Y-m-d",strtotime('first day of last month')),
+			    '#date_format' => 'Y-m-d',
+			    '#date_year_range' => '-2:0',
+			    '#type' => 'date_popup',
+			    '#weight'=>5,
+			    '#datepicker_options' => array('maxDate' => -2),
+			);
+		$form['send_mail'] ['end_date_input'] = array(
+				'#title' => t('End Date'),
+			    '#date_format' => 'Y-m-d',
+			    '#default_value' => date("Y-m-d",strtotime('last day of last month')), 
+			    '#date_year_range' => '-2:0',
+			    '#type' => 'date_popup',
+			    '#weight'=>6,
+			    '#datepicker_options' => array('maxDate' => -1),
+			);
+		$form['send_mail']['dfp_email_form'] = array(
+		   '#title' => t('Emails:'),
+		   '#type' => 'textfield',
+		   '#weight'=>7,
+		);
+		$form['send_mail']['send_submit'] = array(
+		   '#value' => t('Send Now'),
+		   '#type' => 'submit',
+		   '#weight'=>8,
+		   '#id' => 'ajax_link_send_mail',
+		   '#ajax' => array(
+		   'callback' => 'dfp_report_ajax_send_mail_callback',
+		   'method' => 'html',
+		   ),
+		$form['status'] = array(
+			'#type' => 'markup',
+			'#markup' => '<div id="dfp_send_mail_status"></div>',
+			'#weight'=>-1,
+		),
+		);
+
+		return $form;
+}
+
+/**
+* Validate for  simple form to get date for forecast.
+*/
+function dfp_report_send_mail_form_validate($form,&$form_state){
+	//form_set_error('dfp_email_form','Please enter an email address.');
+    $email = $form_state['values']['dfp_email_form'];
+    $startDate = strtotime($form_state['values']['start_date_input']);
+	$endDate = strtotime($form_state['values']['end_date_input']);
+	if($email==''||!isset($email)){
+		form_set_error('dfp_email_form','Please enter an email address.');
+	}
+	if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+	    form_set_error('dfp_email_form','Email address is not valid.');
+	}
+	if($startDate >= time()){
+		form_set_error('start_date_input','Start time must be less than current time.');
+	}
+	if($endDate >= time()){
+		form_set_error('start_date_input','End time must be less than current time.');
+	}
+	if($startDate >= $endDate){
+		form_set_error('start_date_input','Start time must be less than End time.');
+	}
+}
+
+/**
+*  Ajax callback function to get data
+*/
+function dfp_report_ajax_send_mail_callback($form, &$form_state){
+	$email = $form_state['values']['dfp_email_form'];
+	$startDate = $form_state['values']['start_date_input'];
+	$endDate = $form_state['values']['end_date_input'];
+	$startTime = strtotime($form_state['values']['start_date_input']);
+	$endTime = strtotime($form_state['values']['end_date_input']);
+	//print($email);
+	if($email==''||!isset($email)){
+		$commands[] = ajax_command_html('#dfp_send_mail_status', theme('status_messages'));
+	}elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+	    $commands[] = ajax_command_html('#dfp_send_mail_status', theme('status_messages'));
+	}elseif($startTime >= time()){
+		$commands[] = ajax_command_html('#dfp_send_mail_status', theme('status_messages'));
+	}elseif($endTime >= time()){
+		$commands[] = ajax_command_html('#dfp_send_mail_status', theme('status_messages'));
+	}elseif($startTime >= $endTime){
+		$commands[] = ajax_command_html('#dfp_send_mail_status', theme('status_messages'));
+	}else{
+		//load current node, and get inventory forcast
+	    $node = node_load($form_state['values']['node_id']);
+	    $orderID = field_get_items('node', $node, 'field_dfp_report_id');
+		$orderIDValue = isset($orderID[0]['value']) ? $orderID[0]['value'] : 0;
+		$value->title = isset($node->title) ? $node->title : 'DFP Report';
+		//get data and send mail
+		if(dfp_report_get_report_send_mail($orderIDValue,$startDate,$endDate)){
+			$dir_name = variable_get('file_public_path', conf_path() . '/files')."/dfp_report";
+		  	$filePath = $dir_name .'/report.csv.gz';
+			if(dfp_report_unzip_gz_file($filePath)){
+				//delete file gz
+				unlink($filePath);
+				$filePath = $dir_name .'/report.csv';
+				$report = fopen($filePath, 'r');
+				while(! feof($report))
+				  {
+				     $data[] = fgetcsv($report);
+				  }
+
+				fclose($report);
+				//delete file csv
+			//	unlink($filePath);
+				//send data;
+				if(isset($data)){
+					//print_r($data);
+					//send email
+					dfp_report_process_mail($data,$value);
+					unset($data);
+				}
+			}	
+
+	    }
+
+       drupal_set_message(t('Sent'));
+    //drupal_set_message('');
+       $commands[] = ajax_command_html('#dfp_send_mail_status', theme('status_messages'));
+    }
+    return array(
+      '#type' => 'ajax',
+      '#commands' => $commands,
+    );
+}
+
+
+
+
+
+
+
+
+
+/**
+* Get report from DFP google account with id of ads and time range.
+* Return  the download file url.
+*/
+function dfp_report_get_report_send_mail($id,$startDate,$endDate) {
+	set_include_path('sites/all/libraries/googleads-php-lib-master/src/');
+	$path = libraries_get_path('googleads-php-lib-master');
+	require_once $path.'/src/Google/Api/Ads/Dfp/Lib/DfpUser.php';
+	require_once $path.'/src/Google/Api/Ads/Dfp/Util/ReportDownloader.php';
+	require_once $path.'/src/Google/Api/Ads/Dfp/Util/StatementBuilder.php';
+	$orderId = (int)$id;
+	try {
+	    $oauth2Info = array(
+	      'client_id' => variable_get('dfp_report_client_id'),
+	      'client_secret' => variable_get('dfp_report_client_secret'),
+	      'refresh_token' => variable_get('dfp_report_refresh_token')
+	      );
+	      $applicationName = variable_get('dfp_report_application_name');
+	      $networkCode = variable_get('dfp_report_network_code');
+
+	      // See DfpUser constructor
+	      $user = new DfpUser(NULL, NULL, NULL, $applicationName, $networkCode,
+	      NULL, NULL, $oauth2Info);
+	  
+	  	 // Log SOAP XML request and response.
+		  $user->LogDefaults();
+
+		  // Get the ReportService.
+		  $reportService = $user->GetService('ReportService', 'v201411');
+
+		  // Create report query.
+		  $reportQuery = new ReportQuery();
+		  //$reportQuery->dimensions = array('LINE_ITEM_ID', 'LINE_ITEM_NAME');
+		 $reportQuery->dimensions = array('LINE_ITEM_ID','LINE_ITEM_NAME');
+
+		  $reportQuery->columns = array('AD_SERVER_IMPRESSIONS', 'AD_SERVER_CLICKS',
+			      'AD_SERVER_CTR', 'AD_SERVER_CPM_AND_CPC_REVENUE', 
+			      'AD_SERVER_WITHOUT_CPD_AVERAGE_ECPM');
+
+		  // Set the dynamic date range type or a custom start and end date that is
+		  // the beginning of the week (Sunday) to the end of the week (Saturday), or
+		  // the first of the month to the end of the month.
+		  $statementBuilder = new StatementBuilder();
+		  $statementBuilder->Where('LINE_ITEM_ID = :orderId')->WithBindVariableValue(
+		      'orderId', $orderId);
+
+		  // Set the filter statement.
+		  $reportQuery->statement = $statementBuilder->ToStatement();
+		  //$reportQuery->dateRangeType = $time;
+		$reportQuery->dateRangeType = 'CUSTOM_DATE';    
+		$reportQuery->startDate =  DateTimeUtils::GetDfpDateTime(new
+		DateTime($startDate))->date;
+		$reportQuery->endDate =  DateTimeUtils::GetDfpDateTime(new
+		DateTime($endDate))->date;
+
+
+		  // Create report job.
+		  $reportJob = new ReportJob();
+		  $reportJob->reportQuery = $reportQuery;
+
+		  // Run report job.
+		  $reportJob = $reportService->runReportJob($reportJob);
+		  // Create report downloader.
+		  $reportDownloader = new ReportDownloader($reportService, $reportJob->id);
+
+		  // Wait for the report to be ready.
+		  $reportDownloader->waitForReportReady();
+	
+	
+	      // Create report downloader.
+          $reportDownloader = new ReportDownloader($reportService, $reportJob->id);
+
+          // Wait for the report to be ready.
+          $reportDownloader->waitForReportReady();
+
+          // Change to your file location.
+          $dir_name = variable_get('file_public_path', conf_path() . '/files')."/dfp_report";
+		  if(!is_dir($dir_name)){
+			mkdir($dir_name,0755);
+		  }
+          $filePath = $dir_name .'/report.csv.gz';
+
+          //printf("Downloading report to %s ...\n", $filePath);
+
+          // Download the report.
+          $reportDownloader->downloadReport('CSV_DUMP', $filePath);
+
+          return TRUE;
+	
+	} catch (OAuth2Exception $e) {
+	  drupal_set_message(t('1 %string.', array('%string' => $e->getMessage())), 'error');
+	} catch (ValidationException $e) {
+	  drupal_set_message(t('2 %string.', array('%string' => $e->getMessage())), 'error');
+	} catch (Exception $e) {
+	  drupal_set_message(t('3 %string.', array('%string' => $e->getMessage())), 'error');
+	}	
+	return FALSE;
 }
