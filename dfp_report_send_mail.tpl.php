@@ -20,6 +20,8 @@ switch ($date) {
 		$last = date('m/d/Y', strtotime('last day of last month'));
 		$report = 'Report From: '.$first.' To '.$last;
         break;
+	default:
+			$report = $date;
 }
 ?>
 <div style="width:100%;">

@@ -483,6 +483,8 @@ function dfp_report_ajax_send_mail_callback($form, &$form_state){
 	    $orderID = field_get_items('node', $node, 'field_dfp_report_id');
 		$orderIDValue = isset($orderID[0]['value']) ? $orderID[0]['value'] : 0;
 		$value->title = isset($node->title) ? $node->title : 'DFP Report';
+		$value->field_dfp_report_email_value = $email;
+		$value->field_dfp_email_schedule_value= 'Report From: '.$startDate.' To '.$endDate;
 		//get data and send mail
 		if(dfp_report_get_report_send_mail($orderIDValue,$startDate,$endDate)){
 			$dir_name = variable_get('file_public_path', conf_path() . '/files')."/dfp_report";
